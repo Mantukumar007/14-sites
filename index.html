@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Solar Plant Monitoring</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Solar Plant Dashboard</p>
+          <h1>Monthly Generation - 40 MW Working Plant</h1>
+          <label class="month-control">
+            <span>Report Month</span>
+            <input id="reportMonthInput" type="text" value="April 2026" aria-label="Report month" />
+          </label>
+        </div>
+        <div class="hero-actions">
+          <span id="syncStatus" class="sync-status">Loading sheet data...</span>
+          <span id="saveStatus" class="save-pill">Sync ready</span>
+          <button id="refreshBtn" type="button" title="Refresh data">Refresh</button>
+        </div>
+      </section>
+
+      <section class="metrics-grid" aria-label="Dashboard summary">
+        <article class="metric metric-total">
+          <span>Total Sites</span>
+          <strong id="totalSites">0</strong>
+        </article>
+        <article class="metric">
+          <span>Working</span>
+          <strong id="workingPlants">0</strong>
+        </article>
+        <article class="metric">
+          <span>Not Working</span>
+          <strong id="notWorkingPlants">0</strong>
+        </article>
+        <article class="metric">
+          <span>Total Capacity</span>
+          <strong id="totalCapacity">0 kW</strong>
+        </article>
+      </section>
+
+      <section class="content-panel">
+        <div class="table-toolbar">
+          <div>
+            <h2>Plant Records</h2>
+            <p id="resultCount">Showing 0 records</p>
+          </div>
+          <button id="exportBtn" type="button" title="Download CSV">Export CSV</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>S.N.</th>
+                <th>Site</th>
+                <th>Location</th>
+                <th>Capacity</th>
+                <th>RMS</th>
+                <th>Plant Status</th>
+                <th>Date of Visit</th>
+                <th>E-Today</th>
+                <th>E-Total</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody id="recordsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

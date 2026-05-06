@@ -2,6 +2,8 @@ const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1gPj0r4AZmNwBAhLrOOoy-bvT2hb8bwvDKvBx4bnE9Xk/export?format=csv&gid=0";
 const DEFAULT_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycby7tpRVaE1nhcezxtskP0R_6GUzx3NQi6V_ILqopCj3CsPw8qbAiSiyng9qbUb3YiKp/exec";
+const SUPABASE_URL = "https://wkijgpnzttchqtwyynyx.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_9dAAsM-reAhPdD1mlSUccg_rjFatfXK";
 const AUTO_REFRESH_MS = 60000;
 const DRAFT_KEY = "solar-dashboard-drafts";
 const REPORT_MONTH_KEY = "solar-dashboard-report-month";
@@ -29,10 +31,24 @@ let records = [];
 let drafts = readJson(DRAFT_KEY, {});
 let saveTimers = {};
 let monthTimer;
+let refreshTimer;
+let currentUser = null;
+let dashboardLoaded = false;
+const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 const elements = {
+  loginView: document.querySelector("#loginView"),
+  dashboardView: document.querySelector("#dashboardView"),
+  loginForm: document.querySelector("#loginForm"),
+  loginEmail: document.querySelector("#loginEmail"),
+  loginPassword: document.querySelector("#loginPassword"),
+  loginBtn: document.querySelector("#loginBtn"),
+  rememberMe: document.querySelector("#rememberMe"),
+  loginError: document.querySelector("#loginError"),
   syncStatus: document.querySelector("#syncStatus"),
   saveStatus: document.querySelector("#saveStatus"),
+  userEmail: document.querySelector("#userEmail"),
+  logoutBtn: document.querySelector("#logoutBtn"),
   refreshBtn: document.querySelector("#refreshBtn"),
   totalSites: document.querySelector("#totalSites"),
   workingPlants: document.querySelector("#workingPlants"),
@@ -40,9 +56,32 @@ const elements = {
   totalCapacity: document.querySelector("#totalCapacity"),
   reportMonthInput: document.querySelector("#reportMonthInput"),
   resultCount: document.querySelector("#resultCount"),
-  exportBtn: document.querySelector("#exportBtn"),
+  exportExcelBtn: document.querySelector("#exportExcelBtn"),
+  exportPdfBtn: document.querySelector("#exportPdfBtn"),
   recordsBody: document.querySelector("#recordsBody")
 };
+
+const exportColumns = [
+  { header: "S.N.", key: "sn", width: 7, pdfWidth: 30 },
+  { header: "DISTRICT", key: "district", width: 13, pdfWidth: 62 },
+  { header: "Final Department", key: "finalDepartment", width: 18, pdfWidth: 78 },
+  { header: "DEPT.", key: "department", width: 12, pdfWidth: 54 },
+  { header: "NAME OF BUILDING", key: "building", width: 26, pdfWidth: 108 },
+  { header: "LOCATION", key: "location", width: 22, pdfWidth: 92 },
+  { header: "Site Name", key: "siteName", width: 28, pdfWidth: 112 },
+  { header: "Name of Firm", key: "firm", width: 13, pdfWidth: 58 },
+  { header: "PLANT CAPACITY", key: "plantCapacity", width: 12, pdfWidth: 54 },
+  { header: "RMS Status", key: "rmsStatus", width: 17, pdfWidth: 70 },
+  { header: "Inverter Capacity", key: "inverterCapacity", width: 16, pdfWidth: 70 },
+  { header: "Serial No. of Inverter", key: "inverterSerial", width: 22, pdfWidth: 88 },
+  { header: "Model and Make of inverter", key: "inverterModel", width: 24, pdfWidth: 96 },
+  { header: "Plant status", key: "plantStatus", width: 16, pdfWidth: 68 },
+  { header: "Date of Visit", key: "visitDate", width: 14, pdfWidth: 62 },
+  { header: "E-Today", key: "eToday", width: 14, pdfWidth: 62 },
+  { header: "E-Previous Month", key: "ePreviousMonth", width: 18, pdfWidth: 72 },
+  { header: "E-Total", key: "eTotal", width: 16, pdfWidth: 70 },
+  { header: "REMARK", key: "remark", width: 34, pdfWidth: 154 }
+];
 
 function readJson(key, fallback) {
   try {
@@ -107,6 +146,129 @@ function mapRows(rows) {
 
 function isWorking(record) {
   return normalize(record.plantStatus).toLowerCase() === "working";
+}
+
+function showLogin(message = "") {
+  currentUser = null;
+  elements.loginView.classList.remove("hidden");
+  elements.dashboardView.classList.add("hidden");
+  window.clearInterval(refreshTimer);
+  refreshTimer = undefined;
+  if (message) {
+    showLoginMessage(message);
+  }
+}
+
+function showDashboard(user) {
+  currentUser = user;
+  elements.userEmail.textContent = user.email || "Signed in";
+  elements.loginView.classList.add("hidden");
+  elements.dashboardView.classList.remove("hidden");
+  clearLoginMessage();
+
+  if (!dashboardLoaded) {
+    dashboardLoaded = true;
+    loadData();
+  }
+
+  if (!refreshTimer) {
+    refreshTimer = window.setInterval(() => {
+      const activeElement = document.activeElement;
+      const userIsEditing = activeElement?.matches?.(".editable-field, #reportMonthInput");
+      if (!userIsEditing) {
+        loadData({ refresh: true, silent: true });
+      }
+    }, AUTO_REFRESH_MS);
+  }
+}
+
+function showLoginMessage(message) {
+  elements.loginError.textContent = message;
+  elements.loginError.classList.remove("hidden");
+}
+
+function clearLoginMessage() {
+  elements.loginError.textContent = "";
+  elements.loginError.classList.add("hidden");
+}
+
+function setAuthLoading(isLoading) {
+  elements.loginBtn.disabled = isLoading;
+  elements.loginBtn.textContent = isLoading ? "PLEASE WAIT..." : "LOGIN";
+}
+
+async function initAuth() {
+  if (!supabaseClient) {
+    showLogin("Supabase client load nahi hua. Internet connection check karein.");
+    return;
+  }
+
+  const { data } = await supabaseClient.auth.getSession();
+  if (data.session?.user) {
+    showDashboard(data.session.user);
+  } else {
+    showLogin();
+  }
+
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (session?.user) {
+      showDashboard(session.user);
+    } else {
+      showLogin();
+    }
+  });
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  if (!supabaseClient) {
+    showLoginMessage("Supabase client load nahi hua.");
+    return;
+  }
+  clearLoginMessage();
+  setAuthLoading(true);
+
+  const email = normalize(elements.loginEmail.value);
+  const password = elements.loginPassword.value;
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+  setAuthLoading(false);
+  if (error) {
+    showLoginMessage(error.message);
+    return;
+  }
+
+  if (data.user) {
+    await logLogin(data.user);
+    showDashboard(data.user);
+  }
+}
+
+async function handleLogout() {
+  if (!supabaseClient) {
+    showLogin();
+    return;
+  }
+  await supabaseClient.auth.signOut();
+  dashboardLoaded = false;
+  records = [];
+  elements.recordsBody.innerHTML = "";
+  showLogin();
+}
+
+async function logLogin(user) {
+  try {
+    const { error } = await supabaseClient.from("login_logs").insert({
+      user_id: user.id,
+      email: user.email,
+      user_agent: navigator.userAgent
+    });
+    if (error) {
+      console.warn("Login log insert failed", error.message);
+    }
+  } catch (error) {
+    console.warn("Login log insert failed", error);
+  }
 }
 
 function toDateInputValue(value) {
@@ -179,6 +341,10 @@ function rmsBadge(record) {
 }
 
 function updateRecord(sn, key, value) {
+  if (!currentUser) {
+    setSaveStatus("error", "Login required");
+    return;
+  }
   const record = records.find((item) => item.sn === sn);
   if (!record || !editableKeys.includes(key)) {
     return;
@@ -211,6 +377,10 @@ function saveRow(sn) {
 }
 
 function saveReportMonth() {
+  if (!currentUser) {
+    setSaveStatus("error", "Login required");
+    return;
+  }
   const reportMonth = normalize(elements.reportMonthInput.value);
   localStorage.setItem(REPORT_MONTH_KEY, reportMonth);
   postPayload({ type: "reportMonth", reportMonth });
@@ -257,18 +427,151 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function downloadCsv() {
-  const keys = ["sn", "district", "department", "building", "location", "plantCapacity", "rmsStatus", "plantStatus", "visitDate", "eToday", "eTotal", "remark"];
-  const csvRows = [
-    keys.join(","),
-    ...records.map((record) => keys.map((key) => `"${String(record[key] ?? "").replace(/"/g, '""')}"`).join(","))
-  ];
-  const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
+function exportRows() {
+  return records.map((record) => exportColumns.map((column) => record[column.key] || ""));
+}
+
+function exportTitle() {
+  const month = normalize(elements.reportMonthInput.value || "April 2026").replace(/\s+/g, "-");
+  return `MONTHLY GENERATION OF 40 MW WORKING PLANT _${month}`;
+}
+
+function downloadBlob(blob, filename) {
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "solar-plant-records.csv";
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+async function exportExcel() {
+  if (!window.ExcelJS) {
+    setSaveStatus("error", "Excel library not loaded");
+    return;
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Solar Plant Dashboard";
+  workbook.created = new Date();
+  const worksheet = workbook.addWorksheet("Plant Records", {
+    pageSetup: {
+      orientation: "landscape",
+      paperSize: 8,
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: { left: 0.25, right: 0.25, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 }
+    }
+  });
+
+  worksheet.columns = exportColumns.map((column) => ({ key: column.key, width: column.width }));
+  worksheet.mergeCells(1, 1, 1, exportColumns.length);
+  const titleCell = worksheet.getCell(1, 1);
+  titleCell.value = exportTitle();
+  titleCell.font = { bold: true, size: 14, color: { argb: "FF000000" } };
+  titleCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  titleCell.border = {
+    top: { style: "thin", color: { argb: "FF000000" } },
+    left: { style: "thin", color: { argb: "FF000000" } },
+    bottom: { style: "thin", color: { argb: "FF000000" } },
+    right: { style: "thin", color: { argb: "FF000000" } }
+  };
+  worksheet.getRow(1).height = 28;
+  worksheet.addRow([]);
+  worksheet.addRow([]);
+
+  const headerRow = worksheet.addRow(exportColumns.map((column) => column.header));
+  headerRow.height = 36;
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FF000000" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F3F3" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  });
+
+  exportRows().forEach((row) => {
+    const excelRow = worksheet.addRow(row);
+    excelRow.height = 46;
+  });
+
+  worksheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      cell.font = { ...(cell.font || {}), color: { argb: "FF000000" } };
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FF000000" } },
+        left: { style: "thin", color: { argb: "FF000000" } },
+        bottom: { style: "thin", color: { argb: "FF000000" } },
+        right: { style: "thin", color: { argb: "FF000000" } }
+      };
+    });
+  });
+
+  ["C", "E", "F", "G", "L", "M", "S"].forEach((letter) => {
+    worksheet.getColumn(letter).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+  });
+  worksheet.views = [{ state: "frozen", ySplit: 4 }];
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "solar-plant-records.xlsx");
+  setSaveStatus("", "Excel exported");
+}
+
+function exportPdf() {
+  const jsPdf = window.jspdf?.jsPDF;
+  if (!jsPdf || !window.jspdf) {
+    setSaveStatus("error", "PDF library not loaded");
+    return;
+  }
+
+  const doc = new jsPdf({ orientation: "landscape", unit: "pt", format: "a2" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  doc.setTextColor(0, 0, 0);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(exportTitle(), pageWidth / 2, 32, { align: "center", maxWidth: pageWidth - 60 });
+
+  const columnStyles = exportColumns.reduce((styles, column, index) => {
+    styles[index] = {
+      cellWidth: column.pdfWidth,
+      halign: ["building", "location", "siteName", "inverterSerial", "inverterModel", "remark"].includes(column.key) ? "left" : "center"
+    };
+    return styles;
+  }, {});
+
+  doc.autoTable({
+    startY: 70,
+    head: [exportColumns.map((column) => column.header)],
+    body: exportRows(),
+    theme: "grid",
+    margin: { left: 24, right: 24 },
+    styles: {
+      textColor: [0, 0, 0],
+      lineColor: [0, 0, 0],
+      lineWidth: 0.3,
+      font: "helvetica",
+      fontSize: 7.2,
+      cellPadding: 3,
+      overflow: "linebreak",
+      valign: "middle",
+      halign: "center"
+    },
+    headStyles: {
+      textColor: [0, 0, 0],
+      fillColor: [243, 243, 243],
+      lineColor: [0, 0, 0],
+      lineWidth: 0.35,
+      fontStyle: "bold",
+      halign: "center"
+    },
+    columnStyles,
+    didParseCell(data) {
+      data.cell.styles.textColor = [0, 0, 0];
+      data.cell.styles.lineColor = [0, 0, 0];
+    }
+  });
+
+  doc.save("solar-plant-records.pdf");
+  setSaveStatus("", "PDF exported");
 }
 
 async function loadData({ refresh = false, silent = false } = {}) {
@@ -299,8 +602,11 @@ async function loadData({ refresh = false, silent = false } = {}) {
 function setup() {
   elements.reportMonthInput.value = localStorage.getItem(REPORT_MONTH_KEY) || "April 2026";
   setSaveStatus("", "Sync ready");
+  elements.loginForm.addEventListener("submit", handleLogin);
+  elements.logoutBtn.addEventListener("click", handleLogout);
   elements.refreshBtn.addEventListener("click", () => loadData({ refresh: true }));
-  elements.exportBtn.addEventListener("click", downloadCsv);
+  elements.exportExcelBtn.addEventListener("click", exportExcel);
+  elements.exportPdfBtn.addEventListener("click", exportPdf);
   elements.reportMonthInput.addEventListener("input", () => {
     localStorage.setItem(REPORT_MONTH_KEY, elements.reportMonthInput.value);
     setSaveStatus("saving", "Syncing month...");
@@ -317,14 +623,7 @@ function setup() {
       updateRecord(event.target.dataset.sn, event.target.dataset.key, event.target.value);
     }
   });
-  loadData();
-  window.setInterval(() => {
-    const activeElement = document.activeElement;
-    const userIsEditing = activeElement?.matches?.(".editable-field, #reportMonthInput");
-    if (!userIsEditing) {
-      loadData({ refresh: true, silent: true });
-    }
-  }, AUTO_REFRESH_MS);
+  initAuth();
 }
 
 setup();

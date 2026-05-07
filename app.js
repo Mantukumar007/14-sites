@@ -43,7 +43,6 @@ const elements = {
   loginEmail: document.querySelector("#loginEmail"),
   loginPassword: document.querySelector("#loginPassword"),
   loginBtn: document.querySelector("#loginBtn"),
-  rememberMe: document.querySelector("#rememberMe"),
   loginError: document.querySelector("#loginError"),
   syncStatus: document.querySelector("#syncStatus"),
   saveStatus: document.querySelector("#saveStatus"),
@@ -152,10 +151,14 @@ function showLogin(message = "") {
   currentUser = null;
   elements.loginView.classList.remove("hidden");
   elements.dashboardView.classList.add("hidden");
+  elements.loginBtn.disabled = false;
+  elements.loginBtn.textContent = "LOGIN";
   window.clearInterval(refreshTimer);
   refreshTimer = undefined;
   if (message) {
     showLoginMessage(message);
+  } else {
+    clearLoginMessage();
   }
 }
 
@@ -184,17 +187,35 @@ function showDashboard(user) {
 
 function showLoginMessage(message) {
   elements.loginError.textContent = message;
-  elements.loginError.classList.remove("hidden");
+  elements.loginError.className = "message error";
+  shakeLoginBox();
 }
 
 function clearLoginMessage() {
   elements.loginError.textContent = "";
-  elements.loginError.classList.add("hidden");
+  elements.loginError.className = "message hidden";
 }
 
 function setAuthLoading(isLoading) {
   elements.loginBtn.disabled = isLoading;
-  elements.loginBtn.textContent = isLoading ? "PLEASE WAIT..." : "LOGIN";
+  elements.loginBtn.textContent = isLoading ? "AUTHENTICATING..." : "LOGIN";
+}
+
+function shakeLoginBox() {
+  const loginBox = document.querySelector(".login-box");
+  if (!loginBox) {
+    return;
+  }
+  loginBox.animate(
+    [
+      { transform: "translateX(0)" },
+      { transform: "translateX(-8px)" },
+      { transform: "translateX(8px)" },
+      { transform: "translateX(-8px)" },
+      { transform: "translateX(0)" }
+    ],
+    { duration: 400 }
+  );
 }
 
 async function initAuth() {
@@ -239,6 +260,9 @@ async function handleLogin(event) {
   }
 
   if (data.user) {
+    elements.loginError.textContent = "ACCESS GRANTED";
+    elements.loginError.className = "message success";
+    elements.loginBtn.textContent = "SUCCESS";
     await logLogin(data.user);
     showDashboard(data.user);
   }
